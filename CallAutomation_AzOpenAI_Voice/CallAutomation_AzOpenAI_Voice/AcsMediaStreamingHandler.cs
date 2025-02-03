@@ -44,6 +44,8 @@ public class AcsMediaStreamingHandler
         finally
         {
             m_aiServiceHandler.Close();
+            //if(m_webSocket != null )
+            //    await CloseNormalWebSocketAsync();
             this.Close();
         }
     }
