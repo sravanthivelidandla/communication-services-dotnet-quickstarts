@@ -26,6 +26,17 @@ public class ValidatePrescriptionRequest
 public class ValidatePrescriptionResponse
 {
     public string Message { get; set; }
-    public PrescriptionEntity PrescriptionEntity { get; set; }
+    public PrescriptionDetails PrescriptionDetails { get; set; }
     public bool IsSuccess { get; set; }
+}
+
+public class PrescriptionDetails
+{
+    public string UserId { get; set; }
+    public string PrescriptionId { get; set; }
+    public string DrugName { get; set; }
+    public string TotalRefills { get; set; }
+    public string RefillsPending { get; set; }
+    public string PhoneNumber { get; set; }
+    public string DOB { get; set; }
 }

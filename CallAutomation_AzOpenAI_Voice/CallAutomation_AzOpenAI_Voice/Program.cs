@@ -148,6 +148,9 @@ app.MapPost("/api/addParticipant", async (
         {
             var addParticipantCompletedEvent = eventResult.SuccessResult;
             logger.LogInformation($"Call connected with Teams user with id: {addParticipantCompletedEvent.Participant}");
+
+            //hangup the call as the aprticipant is already added. We wanted IVR to drop from the call.
+            await callConnection.HangUpAsync(false);
         }
         else
         {
@@ -155,6 +158,7 @@ app.MapPost("/api/addParticipant", async (
         }
 
         // ...Do more actions, such as Play or AddParticipant, since the call is established...
+        
 
         logger.LogInformation($"Participant added to call with connection id: {callConnectionId}");
 
@@ -190,12 +194,21 @@ app.MapPost("/api/validatePrescription", async (
         var retrievedPrescription = await tableStorageService.GetPrescriptionAsync(validatePrescriptionRequest.prescriptionId);
         Console.WriteLine($"Retrieved Prescription: {retrievedPrescription?.DrugName}");
 
-        return Results.Ok(new ValidatePrescriptionResponse { PrescriptionEntity = retrievedPrescription, Message = "Prescription retrieved successfully", IsSuccess = true });
+        PrescriptionDetails prescriptionDetails = new PrescriptionDetails();
+        if (retrievedPrescription != null) { 
+            prescriptionDetails.DOB = retrievedPrescription.DOB;
+            prescriptionDetails.RefillsPending = retrievedPrescription.RefillsPending;
+            prescriptionDetails.PhoneNumber = retrievedPrescription.PhoneNumber;
+            prescriptionDetails.DrugName = retrievedPrescription.DrugName;
+            prescriptionDetails.PrescriptionId = retrievedPrescription.PrescriptionId;
+        };
+
+        return Results.Ok(new ValidatePrescriptionResponse { PrescriptionDetails = prescriptionDetails, Message = "Prescription retrieved successfully", IsSuccess = true });
     }
     catch (Exception ex)
     {
         logger.LogError($"Error sending digits: {ex.Message}");
-        return Results.Ok(new ValidatePrescriptionResponse { PrescriptionEntity = null, Message = "Prescription not valid", IsSuccess = false });
+        return Results.Ok(new ValidatePrescriptionResponse { PrescriptionDetails = null, Message = "Prescription not valid", IsSuccess = false });
     }
 });
 
