@@ -36,53 +36,64 @@ app.MapPost("/api/incomingCall", async (
 {
     foreach (var eventGridEvent in eventGridEvents)
     {
-        Console.WriteLine($"Incoming Call event received.");
+        var startime = DateTime.Now;
+        Console.WriteLine($"Incoming Call event received. {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
 
-        // Handle system events
-        if (eventGridEvent.TryGetSystemEventData(out object eventData))
+        Task.Run(async () =>
         {
-            // Handle the subscription validation event.
-            if (eventData is SubscriptionValidationEventData subscriptionValidationEventData)
+            //// Handle system events
+            //if (eventGridEvent.TryGetSystemEventData(out object eventData))
+            //{
+            //    // Handle the subscription validation event.
+            //    if (eventData is SubscriptionValidationEventData subscriptionValidationEventData)
+            //    {
+            //        var responseData = new SubscriptionValidationResponse
+            //        {
+            //            ValidationResponse = subscriptionValidationEventData.ValidationCode
+            //        };
+            //    }
+            //}
+
+            var jsonObject = Helper.GetJsonObject(eventGridEvent.Data);
+            var callerId = Helper.GetCallerId(jsonObject);
+            var incomingCallContext = Helper.GetIncomingCallContext(jsonObject);
+            //var incomingCallContext1 = Helper.DecompressGzipString(jsonObject["incomingCallContext"]);
+            var callbackUri = new Uri(new Uri(appBaseUrl), $"/api/callbacks/{Guid.NewGuid()}?callerId={callerId}");
+            logger.LogInformation($"Callback Url: {callbackUri}");
+            var websocketUri = appBaseUrl.Replace("https", "wss") + "/ws";
+            logger.LogInformation($"WebSocket Url: {callbackUri}");
+
+            var mediaStreamingOptions = new MediaStreamingOptions(
+                    new Uri(websocketUri),
+                    MediaStreamingContent.Audio,
+                    MediaStreamingAudioChannel.Mixed,
+                    startMediaStreaming: true
+                    )
             {
-                var responseData = new SubscriptionValidationResponse
-                {
-                    ValidationResponse = subscriptionValidationEventData.ValidationCode
-                };
-                return Results.Ok(responseData);
-            }
-        }
+                EnableBidirectional = true,
+                AudioFormat = AudioFormat.Pcm24KMono
+            };
 
-        var jsonObject = Helper.GetJsonObject(eventGridEvent.Data);
-        var callerId = Helper.GetCallerId(jsonObject);
-        var incomingCallContext = Helper.GetIncomingCallContext(jsonObject);
-        //var incomingCallContext1 = Helper.DecompressGzipString(jsonObject["incomingCallContext"]);
-        var callbackUri = new Uri(new Uri(appBaseUrl), $"/api/callbacks/{Guid.NewGuid()}?callerId={callerId}");
-        logger.LogInformation($"Callback Url: {callbackUri}");
-        var websocketUri = appBaseUrl.Replace("https", "wss") + "/ws";
-        logger.LogInformation($"WebSocket Url: {callbackUri}");
+            var options = new AnswerCallOptions(incomingCallContext, callbackUri)
+            {
+                MediaStreamingOptions = mediaStreamingOptions,
+            };
 
-        var mediaStreamingOptions = new MediaStreamingOptions(
-                new Uri(websocketUri),
-                MediaStreamingContent.Audio,
-                MediaStreamingAudioChannel.Mixed,
-                startMediaStreaming: true
-                )
-        {
-            EnableBidirectional = true,
-            AudioFormat = AudioFormat.Pcm24KMono
-        };
-      
-        var options = new AnswerCallOptions(incomingCallContext, callbackUri)
-        {
-            MediaStreamingOptions = mediaStreamingOptions,
-        };
+            AnswerCallResult answerCallResult = await client.AnswerCallAsync(options);
+            callConnectionId = answerCallResult.CallConnection.CallConnectionId;
 
-        AnswerCallResult answerCallResult = await client.AnswerCallAsync(options);
-        callConnectionId = answerCallResult.CallConnection.CallConnectionId;
-        logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
+            var endtime = DateTime.Now;
+            logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
+            var duration = (endtime - startime).TotalMilliseconds;
+            Console.WriteLine($"Call answered in: {duration} ms");
+        });
     }
+
+    Console.WriteLine($"Return incoming call response. {DateTime.Now:yyyy - MM - dd HH: mm: ss.fff}");
     return Results.Ok();
 });
+
+app.MapGet("/health", () => "Hello ACS CallAutmation");
 
 app.MapPost("/api/transferCall", async (
     [FromBody] TransferRequest transferRequest,
@@ -124,9 +135,7 @@ app.MapPost("/api/addParticipant", async (
         
         var callConnection = client.GetCallConnection(callConnectionId);
         //var callinviteToAdd = new CallInvite(new Azure.Communication.PhoneNumberIdentifier("+14257270513"), new Azure.Communication.PhoneNumberIdentifier("+18882806852"));
-
         //var callInviteToAdd = new CallInvite(new Azure.Communication.MicrosoftTeamsUserIdentifier("6e8aae3b-c44c-44ab-8569-f9b5c028fa17"));
-
 
         //This is the working CQ one.
         var callinviteToAdd = new CallInvite(new Azure.Communication.MicrosoftTeamsAppIdentifier("5d1d11ac-efac-408c-9a2b-3292993e89f1"));
@@ -156,12 +165,7 @@ app.MapPost("/api/addParticipant", async (
         {
             logger.LogError($"Error adding participant: {eventResult.FailureResult.ResultInformation.Message}");
         }
-
-        // ...Do more actions, such as Play or AddParticipant, since the call is established...
-        
-
         logger.LogInformation($"Participant added to call with connection id: {callConnectionId}");
-
     }
     catch (OperationCanceledException ex)
     {
@@ -177,40 +181,6 @@ app.MapPost("/api/addParticipant", async (
     return Results.Ok(new { Message = "Participant added successfully" });
 });
 
-
-
-app.MapPost("/api/validatePrescription", async (
-    [FromBody] ValidatePrescriptionRequest validatePrescriptionRequest,
-    ILogger<Program> logger) =>
-{
-    try
-    {
-        string storageConnectionString = builder.Configuration.GetValue<string>("AzureStorageAccountEndpoint") ?? throw new ArgumentNullException("AzureStorageAccountEndpoint");
-        string tableName = "PrescriptionManager";
-
-        var tableStorageService = new TableStorageService(storageConnectionString, tableName);
-        
-
-        var retrievedPrescription = await tableStorageService.GetPrescriptionAsync(validatePrescriptionRequest.prescriptionId);
-        Console.WriteLine($"Retrieved Prescription: {retrievedPrescription?.DrugName}");
-
-        PrescriptionDetails prescriptionDetails = new PrescriptionDetails();
-        if (retrievedPrescription != null) { 
-            prescriptionDetails.DOB = retrievedPrescription.DOB;
-            prescriptionDetails.RefillsPending = retrievedPrescription.RefillsPending;
-            prescriptionDetails.PhoneNumber = retrievedPrescription.PhoneNumber;
-            prescriptionDetails.DrugName = retrievedPrescription.DrugName;
-            prescriptionDetails.PrescriptionId = retrievedPrescription.PrescriptionId;
-        };
-
-        return Results.Ok(new ValidatePrescriptionResponse { PrescriptionDetails = prescriptionDetails, Message = "Prescription retrieved successfully", IsSuccess = true });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError($"Error sending digits: {ex.Message}");
-        return Results.Ok(new ValidatePrescriptionResponse { PrescriptionDetails = null, Message = "Prescription not valid", IsSuccess = false });
-    }
-});
 
 // api to handle call back events
 app.MapPost("/api/callbacks/{contextId}", async (
@@ -244,9 +214,9 @@ app.Use(async (context, next) =>
         {
             try
             {
+                Console.WriteLine($"web socket received on. {DateTime.Now:yyyy - MM - dd HH: mm: ss.fff} ");
                 var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-                mediaService = new AcsMediaStreamingHandler(webSocket, builder.Configuration);
-
+                mediaService = new AcsMediaStreamingHandler(webSocket, builder.Configuration,client,callConnectionId);
                 // Set the single WebSocket connection
                 await mediaService.ProcessWebSocketAsync();
             }

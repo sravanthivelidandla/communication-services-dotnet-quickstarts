@@ -10,6 +10,8 @@ using Microsoft.CognitiveServices.Speech;
 using OpenAI;
 using Microsoft.DevTunnels.Ssh.Algorithms;
 using System.Dynamic;
+using Microsoft.Extensions.Logging;
+using CallAutomation_AzOpenAI_Voice;
 
 #pragma warning disable OPENAI002
 namespace CallAutomationOpenAI
@@ -25,14 +27,20 @@ namespace CallAutomationOpenAI
         private IConfiguration configuration;
         private string finishToolName = "user_wants_to_finish_conversation";
         private string addParticipantTool = "addParticipant";
+        private CallAutomationClient client;
+        private string callConnectionId;
+        private ToolHandler toolHandler;
 
-        public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration)
+        public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration, CallAutomationClient client, string callConnectionId)
         {            
             m_mediaStreaming = mediaStreaming;
             m_cts = new CancellationTokenSource();
             m_aiSession =  CreateAISessionAsync(configuration).GetAwaiter().GetResult();
             m_memoryStream = new MemoryStream();
             this.configuration = configuration;
+            this.client = client;
+            this.callConnectionId = callConnectionId;
+            this.toolHandler = new ToolHandler(client, callConnectionId, configuration);
         }
 
         private async Task<RealtimeConversationSession> CreateAISessionAsync(IConfiguration configuration)
@@ -52,46 +60,6 @@ namespace CallAutomationOpenAI
             var RealtimeCovnClient = aiClient.GetRealtimeConversationClient(openAiModelName);
             var session =  await RealtimeCovnClient.StartConversationSessionAsync();
 
-            // We'll add a simple function tool that enables the model to interpret user input to figure out when it
-            // might be a good time to stop the interaction.
-            ConversationFunctionTool finishConversationTool = new()
-            {
-                Name = finishToolName,
-                Description = "Invoked when the user says goodbye, expresses being finished, or otherwise seems to want to stop the interaction.",
-                Parameters =  BinaryData.FromString("""
-                {
-                    "type": "object",
-                    "properties": {
-                        "customer_name": {
-                            "type": "string",
-                            "description": "The customer's name (optional)."
-                        },
-                        "time_of_day": {
-                            "type": "string",
-                            "enum": ["morning", "afternoon", "evening"],
-                            "description": "The time of day to personalize the greeting."
-                        }
-                    },
-                    "required": [""]
-                }
-                """)
-              };
-       
-
-            ConversationFunctionTool startConversationTool = new()
-            {
-                Name = "get_greeting_message",
-                Description = "Generates a greeting message for the user.",
-                Parameters = BinaryData.FromString("{}")
-            };
-
-            ConversationFunctionTool SpeakToAgent = new()
-            {
-                Name = "speakToAgent",
-                Description = "Invoked when the user wants to talk or reach out or speak to a pharmacist or doctor.",
-                Parameters = BinaryData.FromString("{}")
-            };
-
             // Session options control connection-wide behavior shared across all conversations,
             // including audio input format and voice activity detection settings.
             ConversationSessionOptions sessionOptions = new()
@@ -105,7 +73,7 @@ namespace CallAutomationOpenAI
                     Model = "whisper-1",
                 },
                 TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(0.5f, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500)),
-                Tools = { finishConversationTool , validatePrescriptionTool(), SpeakToAgent },
+                Tools = { validatePrescriptionTool, SpeakToAgent, endConversation },
             };
 
             await session.ConfigureSessionAsync(sessionOptions);
@@ -156,10 +124,6 @@ namespace CallAutomationOpenAI
                     {
                         Console.WriteLine($" >>> USER: {transcriptionFinishedUpdate.Transcript}");
                         string transcription = transcriptionFinishedUpdate.Transcript;
-                        
-                        processTranscription(transcription);
-
-                        
                     }
 
                     // Audio transcript  updates contain the incremental text matching the generated
@@ -167,64 +131,33 @@ namespace CallAutomationOpenAI
                     if (update is ConversationItemStreamingAudioTranscriptionFinishedUpdate outputTranscriptDeltaUpdate)
                     {
                         Console.Write(outputTranscriptDeltaUpdate.Transcript);
-                       
-                        //if (outputTranscriptDeltaUpdate.Transcript.Contains("transfer", StringComparison.OrdinalIgnoreCase))
-                        //{
-                        //    //await m_aiSession.CancelResponseAsync();
-                        //    //await m_aiSession.ClearInputAudioAsync();
-                        //    await TransferToAgentAsync(Guid.NewGuid().ToString());
-                        //}
                     }
 
+                    if(update is ConversationItemStreamingAudioFinishedUpdate test)
+                    {
+                        Console.WriteLine("AI has finished responding and waiting for user input");
+                    }
                     
 
                     if (update is ConversationItemStreamingFinishedUpdate itemStreamingFinishedUpdate)
                     {
-                        Console.WriteLine();
-                        Console.WriteLine($"  -- Item streaming finished, item_id={itemStreamingFinishedUpdate.ItemId}");
-
-                        if (itemStreamingFinishedUpdate.FunctionName == finishToolName)
+                        if(!string.IsNullOrEmpty(itemStreamingFinishedUpdate.FunctionName))
                         {
-                            Console.WriteLine($" <<< Finish tool invoked -- ending conversation!");
-                            break;
-                        }
-
-                        if(itemStreamingFinishedUpdate.FunctionName == "validatePrescription")
-                        {
-                            Console.WriteLine($" <<< Validate tool invoked -- validating prescription!");
-                            var result = await HandleToolInvocation(itemStreamingFinishedUpdate.FunctionName, itemStreamingFinishedUpdate.FunctionCallArguments);
+                            var result = await toolHandler.HandleToolInvocation(itemStreamingFinishedUpdate.FunctionName, itemStreamingFinishedUpdate.FunctionCallArguments);
 
                             ConversationItem functionOutputItem = ConversationItem.CreateFunctionCallOutput(
                               callId: itemStreamingFinishedUpdate.FunctionCallId,
                               output: result);
                             await m_aiSession.AddItemAsync(functionOutputItem);
-                            //await m_aiSession.ClearInputAudioAsync();
-                            //await m_aiSession.CancelResponseAsync();
                             await m_aiSession.StartResponseAsync();
                             await m_mediaStreaming.SendMessageAsync(result);
 
+                            if (itemStreamingFinishedUpdate.FunctionName == "endConversation")
+                            {
+                                Thread.Sleep(3000);
+                                await hangUp();
+                            }
                         }
-
-                        //if (itemStreamingFinishedUpdate.FunctionName == "get_greeting_message")
-                        //{
-                        //    Console.WriteLine($" <<< Validate tool invoked -- get_greeting_message!");
-                        //    var result = "Welcome To Prescription Renewal service.You are calling from 1234567. If this is the phone number associated with your prescription please say “Yes” otherwise please say or enter the phone number associated with your prescription ";
-
-                        //    ConversationItem functionOutputItem = ConversationItem.CreateFunctionCallOutput(
-                        //      callId: itemStreamingFinishedUpdate.FunctionCallId,
-                        //      output: result);
-                        //    await m_aiSession.AddItemAsync(functionOutputItem);
-                        //    await m_aiSession.StartResponseAsync();
-                        //    await m_mediaStreaming.SendMessageAsync(result);
-
-                        //}
-
-                        if (itemStreamingFinishedUpdate.FunctionName == "speakToAgent")
-                        {
-                            Console.WriteLine($" <<< TransferToAgentToolInvoked!");
-                            await TransferToAgentAsync(Guid.NewGuid().ToString());
-                        }
-
                         else if (itemStreamingFinishedUpdate.MessageContentParts?.Count > 0)
                         {
                             Console.Write($"    + [{itemStreamingFinishedUpdate.MessageRole}]: ");
@@ -264,12 +197,6 @@ namespace CallAutomationOpenAI
                     if (update is ConversationResponseFinishedUpdate turnFinishedUpdate)
                     {
                         Console.WriteLine($"  -- Model turn generation finished. Status: {turnFinishedUpdate.Status}");
-                        if (turnFinishedUpdate.CreatedItems.Any(item => item.FunctionName?.Length > 0))
-                        {
-                            Console.WriteLine($"  -- Ending client turn for pending tool responses");
-                            
-                        }
-                      
                     }
 
                     if (update is ConversationErrorUpdate errorUpdate)
@@ -290,123 +217,15 @@ namespace CallAutomationOpenAI
             }
         }
 
-        private void processTranscription(string transcription)
+        private async Task hangUp()
         {
-            if (transcription.Contains("transfer", StringComparison.OrdinalIgnoreCase))
+            var callConnection = client.GetCallConnection(callConnectionId);
+            if (callConnection != null)
             {
-                //await m_aiSession.CancelResponseAsync();
-                //await m_aiSession.ClearInputAudioAsync();
-                //await TransferToAgentAsync(Guid.NewGuid().ToString());
-            }
-            else if (transcription.Contains("validate", StringComparison.OrdinalIgnoreCase))
-            {
-                
+                _ = await callConnection.HangUpAsync(true);
             }
         }
 
-
-        private async Task TransferToAgentAsync(string callConnectionId)
-        {
-            var transferRequest = new TransferRequest
-            {
-                CallConnectionId = callConnectionId,
-                TargetPhoneNumber = "target-agent-phone-number" // Replace with the actual target phone number
-            };
-
-            var jsonString = JsonConvert.SerializeObject(transferRequest);
-            var content = new StringContent(jsonString, Encoding.UTF8, "application/json");
-
-            using var httpClient = new HttpClient();
-            var appBaseUrl = this.configuration.GetValue<string>("AppServiceUri")?.TrimEnd('/');
-            var response = await httpClient.PostAsync(appBaseUrl + "/api/addParticipant", content);
-            //var response = await httpClient.PostAsync(appBaseUrl + "/api/transferCall", content);
-
-            if (response.IsSuccessStatusCode)
-            {
-                Console.WriteLine("Call transferred successfully.");
-            }
-            else
-            {
-                Console.WriteLine("Failed to transfer call.");
-            }
-
-        }
-
-        private async Task<string> HandleToolInvocation(string toolName, string parameters)
-        {
-            if (toolName == "validatePrescription")
-            {
-                var prescriptionDetails = JsonConvert.DeserializeObject<PrescriptionInput>(parameters);
-                if (prescriptionDetails != null)
-                {
-                    // Call the API or execute the booking logic
-                    var result = await ValidatePrescriptionDetails(
-                        prescriptionDetails.prescriptionId,
-                        prescriptionDetails.drugName,
-                        prescriptionDetails.DOB);
-
-                    Console.WriteLine($"Valid prescription details: {result}");
-                    return result;
-                }
-                else
-                {
-                    Console.WriteLine("Invalid prescription parameters.");
-                }
-            }
-            else
-            {
-                Console.WriteLine($"Unknown tool: {toolName}");
-            }
-            return "tool not invoked";
-        }
-
-
-        private async Task<string> ValidatePrescriptionDetails(string prescriptionId, string drugName, string dateofBirth)
-        {
-            var prescriptionRequest = new ValidatePrescriptionRequest
-            {
-                prescriptionId = prescriptionId
-            };
-
-            var jsonString = JsonConvert.SerializeObject(prescriptionRequest);
-            var content = new StringContent(jsonString, Encoding.UTF8, "application/json");
-
-            using var httpClient = new HttpClient();
-            var appBaseUrl = this.configuration.GetValue<string>("AppServiceUri")?.TrimEnd('/');
-            var response = await httpClient.PostAsync(appBaseUrl + "/api/validatePrescription", content);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var responseData = await response.Content.ReadAsStringAsync();
-                var parsedResponse = JsonConvert.DeserializeObject<ValidatePrescriptionResponse>(responseData);
-
-                if (parsedResponse?.PrescriptionEntity.PrescriptionId == prescriptionId)
-                {
-                    
-                    return "Prescription Validation Successful. Renewal for prescription is placed and will be available by 1AM.";
-                    //if (parsedResponse?.DrugName == drugName)
-                    //{
-                    //    Console.WriteLine("valid details provided");
-                    //    return "Prescription Validation Successful. Renewal for prescription is placed and will be available by 1AM.";
-                    //}
-                    //else
-                    //{
-                    //    return "Drug name does not match.";
-                    //}
-                }
-                else
-                {
-                    return "Prescription Id does not match.";
-                }
-            }
-            else
-            {
-                Console.WriteLine("Failed to validate prescription.");
-                return "Validation Failed";
-            }
-
-            return " Nothing happened";
-        }
 
         public void StartConversation()
         {
@@ -424,60 +243,12 @@ namespace CallAutomationOpenAI
             m_cts.Dispose();
             m_aiSession.Dispose();
         }
-        public async Task RemoveBotFromCallAsync()
+
+        ConversationFunctionTool validatePrescriptionTool = new()
         {
-            try
-            {
-                // Stop the AI session response
-                await m_aiSession.CancelResponseAsync();
-
-                // Clear any input audio
-                await m_aiSession.ClearInputAudioAsync();
-
-                // Send a message to stop audio streaming
-                var jsonString = OutStreamingData.GetStopAudioForOutbound();
-                await m_mediaStreaming.SendMessageAsync(jsonString);
-
-                Console.WriteLine("Bot has been removed from the call and audio streaming has been stopped.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Exception while removing bot from call -> {ex}");
-            }
-        }
-
-        private static ConversationFunctionTool CreateSampleWeatherTool()
-        {
-            return new ConversationFunctionTool()
-            {
-                Name = "get_weather_for_location",
-                Description = "gets the weather for a location",
-                Parameters = BinaryData.FromString("""
-            {
-              "type": "object",
-              "properties": {
-                "location": {
-                  "type": "string",
-                  "description": "The city and state, e.g. San Francisco, CA"
-                },
-                "unit": {
-                  "type": "string",
-                  "enum": ["c","f"]
-                }
-              },
-              "required": ["location","unit"]
-            }
-            """)
-            };
-        }
-
-        private static ConversationFunctionTool validatePrescriptionTool()
-        {
-            return new ConversationFunctionTool()
-            {
-                Name = "validatePrescription",
-                Description = "Once the user provides all the inputs like PrescriptionId, DrugName and Date of Birth, Validates the prescription based on the PrescriptionId, DrugName and DateOfBirth",
-                Parameters = BinaryData.FromString("""
+            Name = "validatePrescription",
+            Description = "Once the user provides all the inputs like PrescriptionId, DrugName and Date of Birth, Validates the prescription based on the PrescriptionId, DrugName and DateOfBirth",
+            Parameters = BinaryData.FromString("""
                 {
                     "type": "object",
                     "properties": {
@@ -491,14 +262,37 @@ namespace CallAutomationOpenAI
                         },
                         "DOB": {
                             "type": "string",
-                            "description": "The date of birth in YYYY-MM-DD format"
+                            "description": "The date of birth. "
                         }
                     },
                     "required": ["prescriptionId", "drugName", "DOB"]
                 }
                 """)
-            };
+        };
 
+        ConversationFunctionTool SpeakToAgent = new()
+        {
+            Name = "speakToAgent",
+            Description = "Invoked when the user wants to talk or reach out or speak to a pharmacist or doctor.",
+            Parameters = BinaryData.FromString("{}")
+        };
+
+
+        ConversationFunctionTool endConversation = new()
+        {
+            Name = "endConversation",
+            Description = " Leave the call when you say goodbye or caller says goodbye or Thank you or The user has nothing for you to act upon",
+            Parameters = BinaryData.FromString("{}")
+        };
+        private string GetPickupDate()
+        {
+            DateTime futureDateTime = DateTime.Now.AddDays(1).AddHours(3);
+            return futureDateTime.ToString("dd-MMM HH");
+        }
+        private string GetPickupTime()
+        {
+            DateTime futureDateTime = DateTime.Now.AddDays(1).AddHours(3); 
+            return futureDateTime.ToString("htt").Replace("AM", "AM").Replace("PM", "PM");
         }
 
         

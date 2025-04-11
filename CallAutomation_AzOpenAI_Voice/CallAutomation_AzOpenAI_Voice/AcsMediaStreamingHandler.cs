@@ -11,14 +11,18 @@ public class AcsMediaStreamingHandler
     private MemoryStream m_buffer;
     private AzureOpenAIService m_aiServiceHandler;
     private IConfiguration m_configuration;
+    private CallAutomationClient client;
+    private string callConnectionId;
 
     // Constructor to inject OpenAIClient
-    public AcsMediaStreamingHandler(WebSocket webSocket, IConfiguration configuration)
+    public AcsMediaStreamingHandler(WebSocket webSocket, IConfiguration configuration, CallAutomationClient client, string callConnectionId)
     {
         m_webSocket = webSocket;
         m_configuration = configuration;
         m_buffer = new MemoryStream();
         m_cts = new CancellationTokenSource();
+        this.client = client;
+        this.callConnectionId = callConnectionId;
     }
       
     // Method to receive messages from WebSocket
@@ -30,7 +34,7 @@ public class AcsMediaStreamingHandler
         }
         
         // start forwarder to AI model
-        m_aiServiceHandler = new AzureOpenAIService(this, m_configuration);
+        m_aiServiceHandler = new AzureOpenAIService(this, m_configuration, client, callConnectionId);
         
         try
         {
