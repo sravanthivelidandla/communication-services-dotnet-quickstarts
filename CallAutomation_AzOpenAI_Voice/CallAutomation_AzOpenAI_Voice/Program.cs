@@ -69,15 +69,24 @@ app.MapPost("/api/incomingCall", async (
                MediaStreamingOptions = mediaStreamingOptions,
             };
 
-            AnswerCallResult answerCallResult = await client.AnswerCallAsync(options);
-            callConnectionId = answerCallResult.CallConnection.CallConnectionId;            
+            try
+            {
 
-            var endtime = DateTime.Now;
-            Console.WriteLine($"Call answered at : {DateTime.Now:yyyy - MM - dd HH: mm: ss.fff} ");
-            logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
-            var duration = (endtime - startime).TotalMilliseconds;
-            Console.WriteLine($"Call answered in: {duration} ms");
-            logger.LogInformation("Call answered in {Duration} ms", duration);
+                AnswerCallResult answerCallResult = await client.AnswerCallAsync(options);
+                callConnectionId = answerCallResult.CallConnection.CallConnectionId;
+
+                var endtime = DateTime.Now;
+                Console.WriteLine($"Call answered at : {DateTime.Now:yyyy - MM - dd HH: mm: ss.fff} ");
+                logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
+                var duration = (endtime - startime).TotalMilliseconds;
+                Console.WriteLine($"Call answered in: {duration} ms");
+                logger.LogInformation("Call answered in {Duration} ms", duration);
+            }
+            catch(Exception ex)
+            {
+                Console.WriteLine($"Error answering call: {ex.Message}");
+                logger.LogError(ex, "Error answering call");
+            }
         });
     }
 

@@ -154,10 +154,8 @@ namespace CallAutomationOpenAI
                             await m_aiSession.AddItemAsync(functionOutputItem);
                             await m_aiSession.StartResponseAsync();
                             // Only send to user if not endConversation or speakToAgent
-                            if (itemStreamingFinishedUpdate.FunctionName != "endConversation")
-                            {
                                 await m_mediaStreaming.SendMessageAsync(result);
-                            }
+                           
                             if (itemStreamingFinishedUpdate.FunctionName == "endConversation" )
                             {
                                 Thread.Sleep(3000);

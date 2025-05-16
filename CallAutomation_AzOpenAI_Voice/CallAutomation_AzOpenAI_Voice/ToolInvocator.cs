@@ -3,6 +3,7 @@ using CallAutomationOpenAI;
 using Newtonsoft.Json;
 using Microsoft.Extensions.Logging;
 using OpenAI.RealtimeConversation;
+using Azure.Communication;
 
 namespace CallAutomation_AzOpenAI_Voice
 {
@@ -156,7 +157,28 @@ namespace CallAutomation_AzOpenAI_Voice
             {
                 var callConnection = client.GetCallConnection(callConnectionId);
                 var callinviteToAdd = new CallInvite(new Azure.Communication.MicrosoftTeamsAppIdentifier("5d1d11ac-efac-408c-9a2b-3292993e89f1"));
-                callinviteToAdd.CustomCallingContext.AddVoip("prescriptionId", "123456");
+
+                TeamsPhoneCallDetails teamsPhoneCallDetails = new TeamsPhoneCallDetails();
+
+                teamsPhoneCallDetails.TeamsPhoneSourceDetails = new TeamsPhoneSourceDetails(
+                    new MicrosoftTeamsAppIdentifier("5d1d11ac-efac-408c-9a2b-3292993e89f2"), //AA AppId which we get from the incmong custom context
+                "OPEN",
+                "en-US");
+
+                //pass the prescription details here to read all the values from the prescription entity
+                teamsPhoneCallDetails.TeamsPhoneCallerDetails = new TeamsPhoneCallerDetails(
+                    new MicrosoftTeamsUserIdentifier("5d1d11ac-efac-408c-9a2b-3292993e89f1"), "name", "phonenumber")
+                {
+                    IsAuthenticated = true,
+                    ScreenPopUrl = "https://www.bing.com/",
+                    RecordId = "12345"
+                };
+
+                teamsPhoneCallDetails.CallSentiment = "Positive";
+                teamsPhoneCallDetails.CallTopic = "Prescrition Renewal";
+                teamsPhoneCallDetails.CallContext = "Prescription Renewal";
+
+                callinviteToAdd.CustomCallingContext?.SetTeamsPhoneCallDetails(teamsPhoneCallDetails);
 
                 AddParticipantResult addParticipantResult = await callConnection.AddParticipantAsync(new AddParticipantOptions(callinviteToAdd));
                 
