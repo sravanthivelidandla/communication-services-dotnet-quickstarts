@@ -15,6 +15,10 @@ public class PrescriptionEntity : ITableEntity
     public string DOB { get; set; }
     public ETag ETag { get; set; }
     public DateTimeOffset? Timestamp { get; set; }
+
+    public string RecordId { get; set; }
+
+    public string ScreenPopUpUrl { get; set; }
 }
 
 public class ValidatePrescriptionRequest

@@ -41,7 +41,10 @@ using System.Threading.Tasks;
             DrugName = entity.DrugName,
             PrescriptionId = entity.PrescriptionId,
             RefillsPending = entity.RefillsPending,
-            TotalRefills = entity.TotalRefills
+            TotalRefills = entity.TotalRefills,
+            RecordId = entity.RecordId,
+            ScreenPopUpUrl = entity.ScreenPopUpUrl,
+            PhoneNumber = entity.PhoneNumber
             // Map other properties from entity to PrescriptionEntity
         };
     }

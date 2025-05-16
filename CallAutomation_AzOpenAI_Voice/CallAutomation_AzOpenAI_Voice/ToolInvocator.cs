@@ -1,6 +1,8 @@
 ﻿using Azure.Communication.CallAutomation;
 using CallAutomationOpenAI;
 using Newtonsoft.Json;
+using Microsoft.Extensions.Logging;
+using OpenAI.RealtimeConversation;
 
 namespace CallAutomation_AzOpenAI_Voice
 {
@@ -11,11 +13,15 @@ namespace CallAutomation_AzOpenAI_Voice
         private IConfiguration configuration;
 
         public ToolHandler(CallAutomationClient client, string callConnectionId, IConfiguration configuration)
+#pragma warning restore OPENAI002 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
         {
             this.client = client;
             this.callConnectionId = callConnectionId;
             this.configuration = configuration;
+           
+           // this.//_logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ToolHandler>.Instance;
         }
+
         public async Task<string> HandleToolInvocation(string toolName, string parameters)
         {
             if (toolName == "validatePrescription")
@@ -56,12 +62,94 @@ namespace CallAutomation_AzOpenAI_Voice
             {
                 Console.WriteLine($" <<< AddParticipantToolInvoked!");
                 await AddParticipantAsync();
-                
+
             }
             return "tool not invoked";
         }
+        //public async Task<string> HandleToolInvocation(string toolName, string parameters)
+        //{
+        //    if (toolName == "validatePrescription")
+        //    {
+        //        Console.WriteLine($" <<< Validate tool invoked -- validating prescription!");
+        //        var prescriptionDetails = JsonConvert.DeserializeObject<PrescriptionInput>(parameters);
+        //        if (prescriptionDetails != null)
+        //        {
+        //            // Call the API or execute the booking logic
+        //            var result = await ValidatePrescriptionDetails(
+        //                prescriptionDetails.prescriptionId,
+        //                prescriptionDetails.drugName,
+        //                prescriptionDetails.DOB);
 
+        //            Console.WriteLine($"Valid prescription details: {result}");
+        //            return result;
+        //        }
+        //        else
+        //        {
+        //            Console.WriteLine("Invalid prescription parameters.");
+        //        }
+        //    }
+        //    else if (toolName == "endConversation" || toolName == "speakToAgent")
+        //    {
+        //        try
+        //        {
+        //            if (toolName == "endConversation")
+        //                Console.WriteLine($" <<< Tool invoked -- endConversation!");
+        //            else
+        //                Console.WriteLine($" <<< AddParticipantToolInvoked!");
 
+        //            // Call analytics tools
+        //            var callIntent = await HandleToolInvocation("getCallIntent", "{}");
+        //            var callSummary = await HandleToolInvocation("summarizeCall", "{}");
+        //            var sentiment = await HandleToolInvocation("analyzeSentiment", "{}");
+        //            //_logger.LogInformation("CallIntent: {CallIntent}", callIntent);
+        //            //_logger.LogInformation("CallSummary: {CallSummary}", callSummary);
+        //            //_logger.LogInformation("Sentiment: {Sentiment}", sentiment);
+
+        //            if (toolName == "speakToAgent")
+        //            {
+        //                await AddParticipantAsync();
+        //            }
+        //            if (toolName == "endConversation")
+        //            {
+
+        //            }
+        //                return $"[Analytics] CallIntent: {callIntent}\nCallSummary: {callSummary}\nSentiment: {sentiment}";
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            Console.WriteLine($"Error in {toolName}: {ex.Message}");
+        //        }
+        //        return "";
+        //    }
+        //    //else if (toolName == "getCallIntent" || toolName == "summarizeCall" || toolName == "analyzeSentiment")
+        //    //{
+        //    //    var result =  await GetOpenAIToolResult(toolName, parameters);
+        //    //    Console.WriteLine($" <<< Tool invoked -- {toolName} : {result}!");
+        //    //    return result;
+        //    //}
+        //    return "tool not invoked";
+        //}
+        //private async Task<string> GetOpenAIToolResult(string toolName, string parameters)
+        //{
+        //    var session = m_aiSession;// Add a public getter for m_aiSession in AzureOpenAIService
+        //                                               // Fix for OPENAI002: Suppress the diagnostic warning for 'OpenAI.RealtimeConversation.ConversationItem'
+        //    #pragma warning disable OPENAI002
+
+        //    // Fix for CS0117: Replace 'CreateFunctionCallInput' with 'CreateFunctionCall' as per the provided type signatures
+        //    var item = ConversationItem.CreateFunctionCall(toolName, Guid.NewGuid().ToString(), parameters);
+        //    await session.AddItemAsync(item);
+        //    await session.StartResponseAsync();
+
+        //    await foreach (ConversationUpdate update in session.ReceiveUpdatesAsync(CancellationToken.None))
+        //    {
+        //        if (update is ConversationItemStreamingFinishedUpdate finishedUpdate &&
+        //            finishedUpdate.FunctionName == toolName)
+        //        {
+        //            return finishedUpdate.MessageContentParts?.FirstOrDefault()?.Text ?? "";
+        //        }
+        //    }
+        //    return "";
+        //}
         private async Task AddParticipantAsync()
         {
             try
@@ -150,7 +238,7 @@ namespace CallAutomation_AzOpenAI_Voice
     }
 }
 
-    public class PrescriptionInput
+public class PrescriptionInput
 {
     public string prescriptionId { get; set; }
     public string drugName { get; set; }

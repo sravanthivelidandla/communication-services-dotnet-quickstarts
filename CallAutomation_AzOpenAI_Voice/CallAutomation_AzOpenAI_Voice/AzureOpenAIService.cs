@@ -30,6 +30,7 @@ namespace CallAutomationOpenAI
         private CallAutomationClient client;
         private string callConnectionId;
         private ToolHandler toolHandler;
+       // private readonly ILogger<AzureOpenAIService> //_logger;
 
         public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration, CallAutomationClient client, string callConnectionId)
         {            
@@ -40,6 +41,8 @@ namespace CallAutomationOpenAI
             this.configuration = configuration;
             this.client = client;
             this.callConnectionId = callConnectionId;
+
+            // this.//_logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AzureOpenAIService>.Instance;
             this.toolHandler = new ToolHandler(client, callConnectionId, configuration);
         }
 
@@ -73,7 +76,7 @@ namespace CallAutomationOpenAI
                     Model = "whisper-1",
                 },
                 TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(0.5f, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500)),
-                Tools = { validatePrescriptionTool, SpeakToAgent, endConversation },
+                Tools = { validatePrescriptionTool, SpeakToAgent, endConversation },//summarizeCall, analyzeSentiment, getCallIntent },
             };
 
             await session.ConfigureSessionAsync(sessionOptions);
@@ -150,9 +153,12 @@ namespace CallAutomationOpenAI
                               output: result);
                             await m_aiSession.AddItemAsync(functionOutputItem);
                             await m_aiSession.StartResponseAsync();
-                            await m_mediaStreaming.SendMessageAsync(result);
-
-                            if (itemStreamingFinishedUpdate.FunctionName == "endConversation")
+                            // Only send to user if not endConversation or speakToAgent
+                            if (itemStreamingFinishedUpdate.FunctionName != "endConversation")
+                            {
+                                await m_mediaStreaming.SendMessageAsync(result);
+                            }
+                            if (itemStreamingFinishedUpdate.FunctionName == "endConversation" )
                             {
                                 Thread.Sleep(3000);
                                 await hangUp();
@@ -210,10 +216,12 @@ namespace CallAutomationOpenAI
             catch (OperationCanceledException e)
             {
                 Console.WriteLine($"{nameof(OperationCanceledException)} thrown with message: {e.Message}");
+                ////_logger.LogWarning(e, "OperationCanceledException during AI streaming");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Exception during ai streaming -> {ex}");
+              //  //_logger.LogError(ex, "Exception during AI streaming");
             }
         }
 
@@ -229,6 +237,7 @@ namespace CallAutomationOpenAI
 
         public void StartConversation()
         {
+            Console.WriteLine($"Bot started talking at :  {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
             _ = Task.Run(async () => await GetOpenAiStreamResponseAsync());
         }
 
@@ -243,6 +252,8 @@ namespace CallAutomationOpenAI
             m_cts.Dispose();
             m_aiSession.Dispose();
         }
+
+        public RealtimeConversationSession GetSession() => m_aiSession;
 
         ConversationFunctionTool validatePrescriptionTool = new()
         {
@@ -284,6 +295,28 @@ namespace CallAutomationOpenAI
             Description = " Leave the call when you say goodbye or caller says goodbye or Thank you or The user has nothing for you to act upon",
             Parameters = BinaryData.FromString("{}")
         };
+
+        ConversationFunctionTool summarizeCall = new()
+        {
+            Name = "summarizeCall",
+            Description = "Summarizes the entire conversation.",
+            Parameters = BinaryData.FromString("{}")
+        };
+
+        ConversationFunctionTool analyzeSentiment = new()
+        {
+            Name = "analyzeSentiment",
+            Description = "Analyzes the sentiment of the conversation.",
+            Parameters = BinaryData.FromString("{}")
+        };
+
+        ConversationFunctionTool getCallIntent = new()
+        {
+            Name = "getCallIntent",
+            Description = "Detects and returns the user's call intent based on the conversation so far.",
+            Parameters = BinaryData.FromString("{}")
+        };
+
         private string GetPickupDate()
         {
             DateTime futureDateTime = DateTime.Now.AddDays(1).AddHours(3);
@@ -294,10 +327,7 @@ namespace CallAutomationOpenAI
             DateTime futureDateTime = DateTime.Now.AddDays(1).AddHours(3); 
             return futureDateTime.ToString("htt").Replace("AM", "AM").Replace("PM", "PM");
         }
-
         
-
-
     }
 
     public class PrescriptionInput
