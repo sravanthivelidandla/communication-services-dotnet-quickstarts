@@ -1,3 +1,6 @@
+using System.ComponentModel.DataAnnotations;
+using System.Net.WebSockets;
+using System.Text.Json;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
@@ -5,8 +8,8 @@ using Azure.Messaging.EventGrid.SystemEvents;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Azure;
 using Newtonsoft.Json;
-using System.ComponentModel.DataAnnotations;
-using System.Net.WebSockets;
+using JsonSerializer = System.Text.Json.JsonSerializer;
+
 
 var builder = WebApplication.CreateBuilder(args);
 AcsMediaStreamingHandler mediaService = null;
@@ -21,7 +24,7 @@ var app = builder.Build();
 
 var appBaseUrl = builder.Configuration.GetValue<string>("AppServiceUri")?.TrimEnd('/');
 string callConnectionId = null;
-
+CustomCallingContext customContext = null;
 if (string.IsNullOrEmpty(appBaseUrl))
 {
     var websiteHostName = Environment.GetEnvironmentVariable("WEBSITE_HOSTNAME");
@@ -41,6 +44,32 @@ app.MapPost("/api/incomingCall", async (
         var startime = DateTime.Now;
         Console.WriteLine($"Incoming Call event received. {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
         logger.LogInformation("Incoming Call event received at {Timestamp}", DateTime.Now);
+
+        // Parse the event using CallAutomationEventParser for IncomingCall events
+        if (eventGridEvent.EventType == "Microsoft.Communication.IncomingCall")
+        {
+            var incomingCallEvent = (Azure.Communication.CallAutomation.IncomingCall)CallAutomationEventParser.Parse(
+                eventGridEvent.Data.ToString(),
+                eventGridEvent.EventType);
+            if (incomingCallEvent != null)
+            {
+                logger.LogInformation($"Incoming call from: {incomingCallEvent.From.RawId} to: {incomingCallEvent.To.RawId}");
+                if (incomingCallEvent.CustomContext != null)
+                {
+                     customContext = incomingCallEvent.CustomContext;
+                    var customContextJson = JsonSerializer.Serialize(
+                        incomingCallEvent.CustomContext,
+                        new JsonSerializerOptions { WriteIndented = true }
+                    );
+                    logger.LogInformation($"CustomContext: {customContextJson}");
+                }
+                else
+                {
+                    logger.LogInformation($"no CustomContext in IncomingCall event");
+                }
+            }
+        }
+
 
         Task.Run(async () =>
         {
@@ -232,7 +261,7 @@ app.Use(async (context, next) =>
                 var logger = context.RequestServices.GetRequiredService<ILogger<AcsMediaStreamingHandler>>();
                 
                 // Pass logger to the handler
-                mediaService = new AcsMediaStreamingHandler(webSocket, builder.Configuration, client, callConnectionId);
+                mediaService = new AcsMediaStreamingHandler(webSocket, builder.Configuration, client, callConnectionId, customContext);
                 
                 // Set the single WebSocket connection
                 await mediaService.ProcessWebSocketAsync();

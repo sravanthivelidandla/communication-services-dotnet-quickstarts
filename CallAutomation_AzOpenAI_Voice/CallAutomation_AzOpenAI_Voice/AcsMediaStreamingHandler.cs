@@ -14,10 +14,11 @@ public class AcsMediaStreamingHandler
     private IConfiguration m_configuration;
     private CallAutomationClient client;
     private string callConnectionId;
-   // private readonly ILogger<AcsMediaStreamingHandler> //_logger;
+    private CustomCallingContext customContext; 
+    // private readonly ILogger<AcsMediaStreamingHandler> //_logger;
 
     // Constructor to inject OpenAIClient and logger
-    public AcsMediaStreamingHandler(WebSocket webSocket, IConfiguration configuration, CallAutomationClient client, string callConnectionId)
+    public AcsMediaStreamingHandler(WebSocket webSocket, IConfiguration configuration, CallAutomationClient client, string callConnectionId,CustomCallingContext customContext)
     {
         m_webSocket = webSocket;
         m_configuration = configuration;
@@ -25,6 +26,7 @@ public class AcsMediaStreamingHandler
         m_cts = new CancellationTokenSource();
         this.client = client;
         this.callConnectionId = callConnectionId;
+        this.customContext = customContext;
         //this.//_logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AcsMediaStreamingHandler>.Instance;
     }
       
@@ -38,7 +40,7 @@ public class AcsMediaStreamingHandler
         }
         
         // start forwarder to AI model
-        m_aiServiceHandler = new AzureOpenAIService(this, m_configuration, client, callConnectionId);
+        m_aiServiceHandler = new AzureOpenAIService(this, m_configuration, client, callConnectionId,customContext);
         
         try
         {

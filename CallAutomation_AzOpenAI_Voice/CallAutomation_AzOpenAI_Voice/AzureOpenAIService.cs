@@ -1,17 +1,19 @@
-﻿using System.Net.WebSockets;
-using System.Threading.Channels;
-using OpenAI.RealtimeConversation;
-using Azure.AI.OpenAI;
-using System.ClientModel;
-using Azure.Communication.CallAutomation;
-using Newtonsoft.Json;
-using System.Text;
-using Microsoft.CognitiveServices.Speech;
-using OpenAI;
-using Microsoft.DevTunnels.Ssh.Algorithms;
+﻿using System.ClientModel;
 using System.Dynamic;
-using Microsoft.Extensions.Logging;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading.Channels;
+using Azure.AI.OpenAI;
+using Azure.Communication.CallAutomation;
 using CallAutomation_AzOpenAI_Voice;
+using Microsoft.AspNetCore.Http;
+using Microsoft.CognitiveServices.Speech;
+using Microsoft.DevTunnels.Ssh.Algorithms;
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using OpenAI;
+using OpenAI.Chat;
+using OpenAI.RealtimeConversation;
 
 #pragma warning disable OPENAI002
 namespace CallAutomationOpenAI
@@ -30,9 +32,14 @@ namespace CallAutomationOpenAI
         private CallAutomationClient client;
         private string callConnectionId;
         private ToolHandler toolHandler;
-       // private readonly ILogger<AzureOpenAIService> //_logger;
+        private CustomCallingContext customContext;
+        private CallAnalytics callAnalytics;
+        private List<(string Speaker, string Text, DateTime Timestamp)> _transcriptions = new();
+        private StringBuilder _fullTranscript = new StringBuilder();
+        private readonly CallAnalyticsService _callAnalyticsService;
+        // private readonly ILogger<AzureOpenAIService> //_logger;
 
-        public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration, CallAutomationClient client, string callConnectionId)
+        public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration, CallAutomationClient client, string callConnectionId,CustomCallingContext customContext)
         {            
             m_mediaStreaming = mediaStreaming;
             m_cts = new CancellationTokenSource();
@@ -41,9 +48,11 @@ namespace CallAutomationOpenAI
             this.configuration = configuration;
             this.client = client;
             this.callConnectionId = callConnectionId;
+            this.customContext = customContext;
+            _callAnalyticsService = new CallAnalyticsService(configuration);
 
             // this.//_logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AzureOpenAIService>.Instance;
-            this.toolHandler = new ToolHandler(client, callConnectionId, configuration);
+            this.toolHandler = new ToolHandler(client, callConnectionId, configuration,customContext);
         }
 
         private async Task<RealtimeConversationSession> CreateAISessionAsync(IConfiguration configuration)
@@ -76,12 +85,53 @@ namespace CallAutomationOpenAI
                     Model = "whisper-1",
                 },
                 TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(0.5f, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500)),
-                Tools = { validatePrescriptionTool, SpeakToAgent, endConversation },//summarizeCall, analyzeSentiment, getCallIntent },
+                Tools = { validatePrescriptionTool, SpeakToAgent, endConversation},
             };
 
             await session.ConfigureSessionAsync(sessionOptions);
             return session;
         }
+
+        ConversationFunctionTool validatePrescriptionTool = new("validatePrescription")
+        {
+            Name = "validatePrescription",
+            Description = "Once the user provides all the inputs like PrescriptionId, DrugName and Date of Birth, Validates the prescription based on the PrescriptionId, DrugName and DateOfBirth",
+            Parameters = BinaryData.FromString("""
+                    {
+                        "type": "object",
+                        "properties": {
+                            "prescriptionId": {
+                                "type": "string",
+                                "description": "PrescriptionId of the user"
+                            },
+                            "drugName": {
+                                "type": "string",
+                                "description": "Name of the drug. Ex : Advil"
+                            },
+                            "DOB": {
+                                "type": "string",
+                                "description": "The date of birth. "
+                            }
+                        },
+                        "required": ["prescriptionId", "drugName", "DOB"]
+                    }
+                    """)
+        };
+
+        ConversationFunctionTool SpeakToAgent = new("speakToAgent")
+        {
+            Name = "speakToAgent",
+            Description = "Invoked when the user wants to talk or reach out or speak to a pharmacist or doctor.",
+            Parameters = BinaryData.FromString("{}")
+        };
+
+
+        ConversationFunctionTool endConversation = new("endConversation")
+        {
+            Name = "endConversation",
+            Description = " Leave the call when you say goodbye or caller says goodbye or Thank you or The user has nothing for you to act upon",
+            Parameters = BinaryData.FromString("{}")
+        };
 
         // Loop and wait for the AI response
         private async Task GetOpenAiStreamResponseAsync()
@@ -120,21 +170,21 @@ namespace CallAutomationOpenAI
                         Console.WriteLine($"  -- Begin streaming of new item");
                     }
 
-                    // conversation.item.input_audio_transcription.completed will only arrive if input transcription was
-                    // configured for the session. It provides a written representation of what the user said, which can
-                    // provide good feedback about what the model will use to respond.
-                    if (update is ConversationInputTranscriptionFinishedUpdate transcriptionFinishedUpdate)
-                    {
-                        Console.WriteLine($" >>> USER: {transcriptionFinishedUpdate.Transcript}");
-                        string transcription = transcriptionFinishedUpdate.Transcript;
-                    }
+                    //// conversation.item.input_audio_transcription.completed will only arrive if input transcription was
+                    //// configured for the session. It provides a written representation of what the user said, which can
+                    //// provide good feedback about what the model will use to respond.
+                    //if (update is ConversationInputTranscriptionFinishedUpdate transcriptionFinishedUpdate)
+                    //{
+                    //    Console.WriteLine($" >>> USER: {transcriptionFinishedUpdate.Transcript}");
+                    //    string transcription = transcriptionFinishedUpdate.Transcript;
+                    //}
 
-                    // Audio transcript  updates contain the incremental text matching the generated
-                    // output audio.
-                    if (update is ConversationItemStreamingAudioTranscriptionFinishedUpdate outputTranscriptDeltaUpdate)
-                    {
-                        Console.Write(outputTranscriptDeltaUpdate.Transcript);
-                    }
+                    //// Audio transcript  updates contain the incremental text matching the generated
+                    //// output audio.
+                    //if (update is ConversationItemStreamingAudioTranscriptionFinishedUpdate outputTranscriptDeltaUpdate)
+                    //{
+                    //    Console.Write(outputTranscriptDeltaUpdate.Transcript);
+                    //}
 
                     if(update is ConversationItemStreamingAudioFinishedUpdate test)
                     {
@@ -146,7 +196,12 @@ namespace CallAutomationOpenAI
                     {
                         if(!string.IsNullOrEmpty(itemStreamingFinishedUpdate.FunctionName))
                         {
-                            var result = await toolHandler.HandleToolInvocation(itemStreamingFinishedUpdate.FunctionName, itemStreamingFinishedUpdate.FunctionCallArguments);
+                            if (itemStreamingFinishedUpdate.FunctionName == "speakToAgent")
+                            {
+                                callAnalytics = await ProcessCallAnalytics();
+                            }
+
+                            var result = await toolHandler.HandleToolInvocation(itemStreamingFinishedUpdate.FunctionName, itemStreamingFinishedUpdate.FunctionCallArguments, callAnalytics);
 
                             ConversationItem functionOutputItem = ConversationItem.CreateFunctionCallOutput(
                               callId: itemStreamingFinishedUpdate.FunctionCallId,
@@ -161,6 +216,8 @@ namespace CallAutomationOpenAI
                                 Thread.Sleep(3000);
                                 await hangUp();
                             }
+
+                            
                         }
                         else if (itemStreamingFinishedUpdate.MessageContentParts?.Count > 0)
                         {
@@ -191,12 +248,27 @@ namespace CallAutomationOpenAI
                         Console.WriteLine($"  -- Item streaming finished, response_id={itemFinishedUpdate.ResponseId}");
                     }
 
-                    if (update is ConversationInputTranscriptionFinishedUpdate transcriptionCompletedUpdate)
+                    // Modify this section for user transcription
+                    if (update is ConversationInputTranscriptionFinishedUpdate transcriptionFinishedUpdate)
                     {
                         Console.WriteLine();
-                        Console.WriteLine($"  -- User audio transcript: {transcriptionCompletedUpdate.Transcript}");
+                        Console.WriteLine($"  -->>> USER- User audio transcript: {transcriptionFinishedUpdate.Transcript}");
                         Console.WriteLine();
+                        string transcription = transcriptionFinishedUpdate.Transcript;
+                        // Add to transcriptions list
+                        _transcriptions.Add(("USER", transcription, DateTime.Now));
+                        _fullTranscript.AppendLine($"USER: {transcription}");
                     }
+
+                    // Modify this section for AI transcription
+                    if (update is ConversationItemStreamingAudioTranscriptionFinishedUpdate outputTranscriptDeltaUpdate)
+                    {
+                        Console.Write(outputTranscriptDeltaUpdate.Transcript);
+                        // Add to transcriptions list
+                        _transcriptions.Add(("AI", outputTranscriptDeltaUpdate.Transcript, DateTime.Now));
+                        _fullTranscript.AppendLine($"AI: {outputTranscriptDeltaUpdate.Transcript}");
+                    }
+
 
                     if (update is ConversationResponseFinishedUpdate turnFinishedUpdate)
                     {
@@ -222,6 +294,18 @@ namespace CallAutomationOpenAI
               //  //_logger.LogError(ex, "Exception during AI streaming");
             }
         }
+        private async Task<CallAnalytics> ProcessCallAnalytics()
+        {
+            Console.WriteLine("Processing call analytics with ChatGPT...");
+
+            // Get the transcript
+            string transcript = GetFullTranscript();
+
+            // Use the dedicated service to analyze the transcript
+            return await _callAnalyticsService.AnalyzeTranscriptWithChatGPT(transcript);
+        }
+
+
 
         private async Task hangUp()
         {
@@ -251,81 +335,20 @@ namespace CallAutomationOpenAI
             m_aiSession.Dispose();
         }
 
-        public RealtimeConversationSession GetSession() => m_aiSession;
-
-        ConversationFunctionTool validatePrescriptionTool = new()
+        /// <summary>
+        /// Returns the full conversation transcript as a formatted string
+        /// </summary>
+        public string GetFullTranscript()
         {
-            Name = "validatePrescription",
-            Description = "Once the user provides all the inputs like PrescriptionId, DrugName and Date of Birth, Validates the prescription based on the PrescriptionId, DrugName and DateOfBirth",
-            Parameters = BinaryData.FromString("""
-                {
-                    "type": "object",
-                    "properties": {
-                        "prescriptionId": {
-                            "type": "string",
-                            "description": "PrescriptionId of the user"
-                        },
-                        "drugName": {
-                            "type": "string",
-                            "description": "Name of the drug. Ex : Advil"
-                        },
-                        "DOB": {
-                            "type": "string",
-                            "description": "The date of birth. "
-                        }
-                    },
-                    "required": ["prescriptionId", "drugName", "DOB"]
-                }
-                """)
-        };
-
-        ConversationFunctionTool SpeakToAgent = new()
-        {
-            Name = "speakToAgent",
-            Description = "Invoked when the user wants to talk or reach out or speak to a pharmacist or doctor.",
-            Parameters = BinaryData.FromString("{}")
-        };
-
-
-        ConversationFunctionTool endConversation = new()
-        {
-            Name = "endConversation",
-            Description = " Leave the call when you say goodbye or caller says goodbye or Thank you or The user has nothing for you to act upon",
-            Parameters = BinaryData.FromString("{}")
-        };
-
-        ConversationFunctionTool summarizeCall = new()
-        {
-            Name = "summarizeCall",
-            Description = "Summarizes the entire conversation.",
-            Parameters = BinaryData.FromString("{}")
-        };
-
-        ConversationFunctionTool analyzeSentiment = new()
-        {
-            Name = "analyzeSentiment",
-            Description = "Analyzes the sentiment of the conversation.",
-            Parameters = BinaryData.FromString("{}")
-        };
-
-        ConversationFunctionTool getCallIntent = new()
-        {
-            Name = "getCallIntent",
-            Description = "Detects and returns the user's call intent based on the conversation so far.",
-            Parameters = BinaryData.FromString("{}")
-        };
-
-        private string GetPickupDate()
-        {
-            DateTime futureDateTime = DateTime.Now.AddDays(1).AddHours(3);
-            return futureDateTime.ToString("dd-MMM HH");
+            return _fullTranscript.ToString();
         }
-        private string GetPickupTime()
+
+        // Add a public method to analyze the transcript on demand
+        public async Task<CallAnalytics> AnalyzeCurrentTranscript()
         {
-            DateTime futureDateTime = DateTime.Now.AddDays(1).AddHours(3); 
-            return futureDateTime.ToString("htt").Replace("AM", "AM").Replace("PM", "PM");
+            string transcript = GetFullTranscript();
+            return await _callAnalyticsService.AnalyzeTranscriptWithChatGPT(transcript);
         }
-        
     }
 
     public class PrescriptionInput

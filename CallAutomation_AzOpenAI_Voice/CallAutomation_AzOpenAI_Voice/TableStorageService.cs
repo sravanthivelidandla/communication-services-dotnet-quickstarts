@@ -38,6 +38,7 @@ using System.Threading.Tasks;
             Timestamp = entity.Timestamp,
             ETag = entity.ETag,
             DOB = entity.DOB,
+            Name = entity.Name,
             DrugName = entity.DrugName,
             PrescriptionId = entity.PrescriptionId,
             RefillsPending = entity.RefillsPending,

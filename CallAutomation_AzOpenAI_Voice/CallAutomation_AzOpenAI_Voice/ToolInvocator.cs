@@ -1,9 +1,10 @@
-﻿using Azure.Communication.CallAutomation;
-using CallAutomationOpenAI;
-using Newtonsoft.Json;
-using Microsoft.Extensions.Logging;
-using OpenAI.RealtimeConversation;
+﻿using System.Text.Json.Serialization;
 using Azure.Communication;
+using Azure.Communication.CallAutomation;
+using CallAutomationOpenAI;
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using OpenAI.RealtimeConversation;
 
 namespace CallAutomation_AzOpenAI_Voice
 {
@@ -12,18 +13,18 @@ namespace CallAutomation_AzOpenAI_Voice
         private CallAutomationClient client;
         private string callConnectionId;
         private IConfiguration configuration;
+        private CustomCallingContext customContext;
+        private PrescriptionDetails prescriptionDetails;
 
-        public ToolHandler(CallAutomationClient client, string callConnectionId, IConfiguration configuration)
-#pragma warning restore OPENAI002 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+        public ToolHandler(CallAutomationClient client, string callConnectionId, IConfiguration configuration,CustomCallingContext customContext)
         {
             this.client = client;
             this.callConnectionId = callConnectionId;
             this.configuration = configuration;
-           
-           // this.//_logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ToolHandler>.Instance;
+            this.customContext = customContext;
         }
 
-        public async Task<string> HandleToolInvocation(string toolName, string parameters)
+        public async Task<string> HandleToolInvocation(string toolName, string parameters, CallAnalytics callAnalytics)
         {
             if (toolName == "validatePrescription")
             {
@@ -50,6 +51,7 @@ namespace CallAutomation_AzOpenAI_Voice
                 try
                 {
                     Console.WriteLine($" <<< Validate tool invoked -- endConversation!");
+                    //var analytics = await ProcessCallAnalytics();
                     return "Good bye!";
                 }
                 catch (Exception ex)
@@ -62,121 +64,38 @@ namespace CallAutomation_AzOpenAI_Voice
             else if (toolName == "speakToAgent")
             {
                 Console.WriteLine($" <<< AddParticipantToolInvoked!");
-                await AddParticipantAsync();
+                await AddParticipantAsync(callAnalytics);
 
             }
             return "tool not invoked";
-        }
-        //public async Task<string> HandleToolInvocation(string toolName, string parameters)
-        //{
-        //    if (toolName == "validatePrescription")
-        //    {
-        //        Console.WriteLine($" <<< Validate tool invoked -- validating prescription!");
-        //        var prescriptionDetails = JsonConvert.DeserializeObject<PrescriptionInput>(parameters);
-        //        if (prescriptionDetails != null)
-        //        {
-        //            // Call the API or execute the booking logic
-        //            var result = await ValidatePrescriptionDetails(
-        //                prescriptionDetails.prescriptionId,
-        //                prescriptionDetails.drugName,
-        //                prescriptionDetails.DOB);
-
-        //            Console.WriteLine($"Valid prescription details: {result}");
-        //            return result;
-        //        }
-        //        else
-        //        {
-        //            Console.WriteLine("Invalid prescription parameters.");
-        //        }
-        //    }
-        //    else if (toolName == "endConversation" || toolName == "speakToAgent")
-        //    {
-        //        try
-        //        {
-        //            if (toolName == "endConversation")
-        //                Console.WriteLine($" <<< Tool invoked -- endConversation!");
-        //            else
-        //                Console.WriteLine($" <<< AddParticipantToolInvoked!");
-
-        //            // Call analytics tools
-        //            var callIntent = await HandleToolInvocation("getCallIntent", "{}");
-        //            var callSummary = await HandleToolInvocation("summarizeCall", "{}");
-        //            var sentiment = await HandleToolInvocation("analyzeSentiment", "{}");
-        //            //_logger.LogInformation("CallIntent: {CallIntent}", callIntent);
-        //            //_logger.LogInformation("CallSummary: {CallSummary}", callSummary);
-        //            //_logger.LogInformation("Sentiment: {Sentiment}", sentiment);
-
-        //            if (toolName == "speakToAgent")
-        //            {
-        //                await AddParticipantAsync();
-        //            }
-        //            if (toolName == "endConversation")
-        //            {
-
-        //            }
-        //                return $"[Analytics] CallIntent: {callIntent}\nCallSummary: {callSummary}\nSentiment: {sentiment}";
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Console.WriteLine($"Error in {toolName}: {ex.Message}");
-        //        }
-        //        return "";
-        //    }
-        //    //else if (toolName == "getCallIntent" || toolName == "summarizeCall" || toolName == "analyzeSentiment")
-        //    //{
-        //    //    var result =  await GetOpenAIToolResult(toolName, parameters);
-        //    //    Console.WriteLine($" <<< Tool invoked -- {toolName} : {result}!");
-        //    //    return result;
-        //    //}
-        //    return "tool not invoked";
-        //}
-        //private async Task<string> GetOpenAIToolResult(string toolName, string parameters)
-        //{
-        //    var session = m_aiSession;// Add a public getter for m_aiSession in AzureOpenAIService
-        //                                               // Fix for OPENAI002: Suppress the diagnostic warning for 'OpenAI.RealtimeConversation.ConversationItem'
-        //    #pragma warning disable OPENAI002
-
-        //    // Fix for CS0117: Replace 'CreateFunctionCallInput' with 'CreateFunctionCall' as per the provided type signatures
-        //    var item = ConversationItem.CreateFunctionCall(toolName, Guid.NewGuid().ToString(), parameters);
-        //    await session.AddItemAsync(item);
-        //    await session.StartResponseAsync();
-
-        //    await foreach (ConversationUpdate update in session.ReceiveUpdatesAsync(CancellationToken.None))
-        //    {
-        //        if (update is ConversationItemStreamingFinishedUpdate finishedUpdate &&
-        //            finishedUpdate.FunctionName == toolName)
-        //        {
-        //            return finishedUpdate.MessageContentParts?.FirstOrDefault()?.Text ?? "";
-        //        }
-        //    }
-        //    return "";
-        //}
-        private async Task AddParticipantAsync()
+        }       
+       
+        private async Task AddParticipantAsync(CallAnalytics callAnalytics)
         {
             try
             {
                 var callConnection = client.GetCallConnection(callConnectionId);
                 var callinviteToAdd = new CallInvite(new Azure.Communication.MicrosoftTeamsAppIdentifier("5d1d11ac-efac-408c-9a2b-3292993e89f1"));
 
-                TeamsPhoneCallDetails teamsPhoneCallDetails = new TeamsPhoneCallDetails();
+                TeamsPhoneCallDetails teamsPhoneCallDetails = customContext.TeamsPhoneCallDetails;
 
-                teamsPhoneCallDetails.TeamsPhoneSourceDetails = new TeamsPhoneSourceDetails(
-                    new MicrosoftTeamsAppIdentifier("5d1d11ac-efac-408c-9a2b-3292993e89f2"), //AA AppId which we get from the incmong custom context
-                "OPEN",
-                "en-US");
+                if(teamsPhoneCallDetails == null)
+                {
+                    teamsPhoneCallDetails = new TeamsPhoneCallDetails();
+                }
 
                 //pass the prescription details here to read all the values from the prescription entity
                 teamsPhoneCallDetails.TeamsPhoneCallerDetails = new TeamsPhoneCallerDetails(
-                    new MicrosoftTeamsUserIdentifier("5d1d11ac-efac-408c-9a2b-3292993e89f1"), "name", "phonenumber")
+                    new PhoneNumberIdentifier(prescriptionDetails?.PhoneNumber), prescriptionDetails?.Name, prescriptionDetails?.PhoneNumber)
                 {
                     IsAuthenticated = true,
-                    ScreenPopUrl = "https://www.bing.com/",
-                    RecordId = "12345"
+                    ScreenPopUrl = prescriptionDetails?.ScreenPopUpUrl,
+                    RecordId = prescriptionDetails?.RecordId
                 };
 
-                teamsPhoneCallDetails.CallSentiment = "Positive";
-                teamsPhoneCallDetails.CallTopic = "Prescrition Renewal";
-                teamsPhoneCallDetails.CallContext = "Prescription Renewal";
+                teamsPhoneCallDetails.CallSentiment = callAnalytics.Sentiment;
+                teamsPhoneCallDetails.CallTopic = callAnalytics.Intent;
+                teamsPhoneCallDetails.CallContext = callAnalytics.Summary;
 
                 callinviteToAdd.CustomCallingContext?.SetTeamsPhoneCallDetails(teamsPhoneCallDetails);
 
@@ -225,7 +144,7 @@ namespace CallAutomation_AzOpenAI_Voice
             var retrievedPrescription = await tableStorageService.GetPrescriptionAsync(prescriptionId);
             Console.WriteLine($"Retrieved Prescription: {retrievedPrescription?.DrugName}");
 
-            PrescriptionDetails prescriptionDetails = new PrescriptionDetails();
+            prescriptionDetails = new PrescriptionDetails();
             if (retrievedPrescription != null)
             {
                 prescriptionDetails.DOB = retrievedPrescription.DOB;
@@ -233,7 +152,11 @@ namespace CallAutomation_AzOpenAI_Voice
                 prescriptionDetails.PhoneNumber = retrievedPrescription.PhoneNumber;
                 prescriptionDetails.DrugName = retrievedPrescription.DrugName;
                 prescriptionDetails.PrescriptionId = retrievedPrescription.PrescriptionId;
+                prescriptionDetails.ScreenPopUpUrl = retrievedPrescription.ScreenPopUpUrl;
+                prescriptionDetails.RecordId = retrievedPrescription.RecordId;
+                prescriptionDetails.Name = retrievedPrescription.Name;
             };
+            
 
             if (prescriptionDetails?.PrescriptionId == prescriptionId)
             {
@@ -257,6 +180,8 @@ namespace CallAutomation_AzOpenAI_Voice
             DateTime futureDateTime = DateTime.Now.AddDays(1).AddHours(3);
             return futureDateTime.ToString("htt").Replace("AM", "AM").Replace("PM", "PM");
         }
+
+       
     }
 }
 
@@ -265,5 +190,17 @@ public class PrescriptionInput
     public string prescriptionId { get; set; }
     public string drugName { get; set; }
     public string DOB { get; set; }
+}
+
+public class CallAnalytics
+{
+    [JsonPropertyName("intent")]
+    public string Intent { get; set; }
+        
+    [JsonPropertyName("summary")]
+    public string Summary { get; set; }
+   
+    [JsonPropertyName("sentiment")]
+    public string Sentiment { get; set; }
 }
 

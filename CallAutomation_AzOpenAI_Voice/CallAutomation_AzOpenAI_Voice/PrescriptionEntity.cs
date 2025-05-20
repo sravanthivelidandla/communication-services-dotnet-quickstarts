@@ -19,6 +19,8 @@ public class PrescriptionEntity : ITableEntity
     public string RecordId { get; set; }
 
     public string ScreenPopUpUrl { get; set; }
+
+    public string Name { get; set; }
 }
 
 public class ValidatePrescriptionRequest
@@ -43,4 +45,9 @@ public class PrescriptionDetails
     public string RefillsPending { get; set; }
     public string PhoneNumber { get; set; }
     public string DOB { get; set; }
+    public string Name { get;set; }
+
+    public string RecordId { get; set; }
+
+    public string ScreenPopUpUrl { get; set; }
 }
