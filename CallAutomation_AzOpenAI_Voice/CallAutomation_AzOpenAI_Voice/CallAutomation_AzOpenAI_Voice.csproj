@@ -19,10 +19,11 @@
     <PackageReference Include="Microsoft.DevTunnels.Connections" Version="1.0.7393" />
     <PackageReference Include="Microsoft.DevTunnels.Contracts" Version="1.0.7393" />
     <PackageReference Include="Microsoft.DevTunnels.Management" Version="1.0.7393" />
+    <PackageReference Include="Microsoft.Extensions.Logging.AzureAppServices" Version="9.0.5" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
-    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.0" />
-    <PackageReference Include="System.Text.Json" Version="8.0.0" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="9.0.5" />
+    <PackageReference Include="System.Text.Json" Version="9.0.5" />
     <PackageReference Include="WindowsAzure.Storage" Version="9.3.3" />
     <PackageReference Include="Azure.Data.Tables" Version="12.5.0" />
   </ItemGroup>

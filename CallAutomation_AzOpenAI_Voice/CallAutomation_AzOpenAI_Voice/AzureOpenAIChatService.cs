@@ -40,7 +40,8 @@ namespace CallAutomationOpenAI
                 Please analyze the following customer service transcript and return the result strictly in JSON format with the following fields:
                 - summary
                 - intent
-                - sentiment (positive, neutral, or negative)
+                - sentiment (positive, neutral, or negative
+                - suggestedActions
 
                 Transcript:
                 {transcript}
@@ -49,14 +50,15 @@ namespace CallAutomationOpenAI
                 {{
                   ""summary"": ""..."",
                   ""intent"": ""..."",
-                  ""sentiment"": ""...""
+                  ""sentiment"": ""..."",
+                  ""suggestedActions"": ""...""
                 }}";
 
             var requestBody = new
             {
                 messages = new[]
                 {
-                new { role = "system", content = "You are a helpful assistant that summarizes customer service calls, identifies customer intent, and analyzes sentiment." },
+                new { role = "system", content = "You are a helpful assistant that summarizes customer service calls, identifies customer intent, and analyzes sentiment. Also highlight suggested actions" },
                 new { role = "user", content = prompt }
             },
                 temperature = 0.3
@@ -101,15 +103,19 @@ namespace CallAutomationOpenAI
             {
                 if (line.StartsWith("1.") || line.StartsWith("Summary:", StringComparison.OrdinalIgnoreCase))
                 {
-                    analytics.Summary = ExtractValue(line);
+                    analytics.callSummary = ExtractValue(line);
                 }
                 else if (line.StartsWith("2.") || line.StartsWith("Intent:", StringComparison.OrdinalIgnoreCase))
                 {
-                    analytics.Intent = ExtractValue(line);
+                    analytics.callIntent = ExtractValue(line);
                 }
                 else if (line.StartsWith("3.") || line.StartsWith("Sentiment:", StringComparison.OrdinalIgnoreCase))
                 {
-                    analytics.Sentiment = ExtractValue(line);
+                    analytics.callSentiment = ExtractValue(line);
+                }
+                else if (line.StartsWith("4.") || line.StartsWith("SuggestedActions:", StringComparison.OrdinalIgnoreCase))
+                {
+                    analytics.suggestedActions = ExtractValue(line);
                 }
             }
 

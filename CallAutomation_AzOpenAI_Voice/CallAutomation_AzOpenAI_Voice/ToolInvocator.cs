@@ -24,7 +24,7 @@ namespace CallAutomation_AzOpenAI_Voice
             this.customContext = customContext;
         }
 
-        public async Task<string> HandleToolInvocation(string toolName, string parameters, CallAnalytics callAnalytics)
+        public async Task<string> HandleToolInvocation(string toolName, string parameters)
         {
             if (toolName == "validatePrescription")
             {
@@ -64,6 +64,7 @@ namespace CallAutomation_AzOpenAI_Voice
             else if (toolName == "speakToAgent")
             {
                 Console.WriteLine($" <<< AddParticipantToolInvoked!");
+                var callAnalytics = JsonConvert.DeserializeObject<CallAnalytics>(parameters);
                 await AddParticipantAsync(callAnalytics);
 
             }
@@ -79,25 +80,45 @@ namespace CallAutomation_AzOpenAI_Voice
 
                 TeamsPhoneCallDetails teamsPhoneCallDetails = customContext.TeamsPhoneCallDetails;
 
-                if(teamsPhoneCallDetails == null)
+                if (prescriptionDetails != null)
                 {
-                    teamsPhoneCallDetails = new TeamsPhoneCallDetails();
+
+                    if (teamsPhoneCallDetails == null)
+                    {
+                        teamsPhoneCallDetails = new TeamsPhoneCallDetails();
+                    }
+
+                    //just to test if we are able to see whether the agent is getting ring.
+//                    teamsPhoneCallDetails.TeamsPhoneSourceDetails = null;
+                    //todo : fix this in PMA :
+                    if (teamsPhoneCallDetails.TeamsPhoneSourceDetails != null)
+                        teamsPhoneCallDetails.TeamsPhoneSourceDetails.Language = "en-Us";
+                    ////Add the source details as a placeholder
+                    //teamsPhoneCallDetails.TeamsPhoneSourceDetails = new TeamsPhoneSourceDetails(
+                    //    new MicrosoftTeamsAppIdentifier("ee9b35e5-f4a1-458d-8c19-aa4a004ecf2f"), "en-us", "open");
+
+                    //pass the prescription details here to read all the values from the prescription entity
+                    teamsPhoneCallDetails.TeamsPhoneCallerDetails = new TeamsPhoneCallerDetails(
+                        new PhoneNumberIdentifier(prescriptionDetails?.PhoneNumber), prescriptionDetails?.Name, prescriptionDetails?.PhoneNumber)
+                    {
+                        IsAuthenticated = true,
+                        ScreenPopUrl = prescriptionDetails?.ScreenPopUpUrl,
+                        RecordId = prescriptionDetails?.RecordId
+                    };
+
+                    //teamsPhoneCallDetails.TeamsPhoneCallerDetails.AddAdditionalCallerInformation("PrescriptionId", prescriptionDetails?.PrescriptionId);
+                    //teamsPhoneCallDetails.TeamsPhoneCallerDetails.AddAdditionalCallerInformation("DrugName", prescriptionDetails?.DrugName);
+                    //teamsPhoneCallDetails.TeamsPhoneCallerDetails.AddAdditionalCallerInformation("DOB", prescriptionDetails?.DOB);
+                    //teamsPhoneCallDetails.TeamsPhoneCallerDetails.AddAdditionalCallerInformation("RefillsPending", prescriptionDetails?.RefillsPending);
+                    //teamsPhoneCallDetails.TeamsPhoneCallerDetails.AddAdditionalCallerInformation("Address", "14004 Abc, BC");
+
+                    teamsPhoneCallDetails.CallSentiment = callAnalytics.callSentiment;
+                    teamsPhoneCallDetails.CallTopic = callAnalytics.callIntent;
+                    teamsPhoneCallDetails.CallContext = callAnalytics.callSummary;
+                    teamsPhoneCallDetails.SuggestedActions = callAnalytics.suggestedActions;
+
+                    callinviteToAdd.CustomCallingContext?.SetTeamsPhoneCallDetails(teamsPhoneCallDetails);
                 }
-
-                //pass the prescription details here to read all the values from the prescription entity
-                teamsPhoneCallDetails.TeamsPhoneCallerDetails = new TeamsPhoneCallerDetails(
-                    new PhoneNumberIdentifier(prescriptionDetails?.PhoneNumber), prescriptionDetails?.Name, prescriptionDetails?.PhoneNumber)
-                {
-                    IsAuthenticated = true,
-                    ScreenPopUrl = prescriptionDetails?.ScreenPopUpUrl,
-                    RecordId = prescriptionDetails?.RecordId
-                };
-
-                teamsPhoneCallDetails.CallSentiment = callAnalytics.Sentiment;
-                teamsPhoneCallDetails.CallTopic = callAnalytics.Intent;
-                teamsPhoneCallDetails.CallContext = callAnalytics.Summary;
-
-                callinviteToAdd.CustomCallingContext?.SetTeamsPhoneCallDetails(teamsPhoneCallDetails);
 
                 AddParticipantResult addParticipantResult = await callConnection.AddParticipantAsync(new AddParticipantOptions(callinviteToAdd));
                 
@@ -195,12 +216,15 @@ public class PrescriptionInput
 public class CallAnalytics
 {
     [JsonPropertyName("intent")]
-    public string Intent { get; set; }
+    public string callIntent { get; set; }
         
     [JsonPropertyName("summary")]
-    public string Summary { get; set; }
+    public string callSummary { get; set; }
    
     [JsonPropertyName("sentiment")]
-    public string Sentiment { get; set; }
+    public string callSentiment { get; set; }
+
+    [JsonPropertyName("suggestedActions")]  
+    public string suggestedActions { get; set; }
 }
 

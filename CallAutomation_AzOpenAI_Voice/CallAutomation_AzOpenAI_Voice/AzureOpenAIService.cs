@@ -37,9 +37,9 @@ namespace CallAutomationOpenAI
         private List<(string Speaker, string Text, DateTime Timestamp)> _transcriptions = new();
         private StringBuilder _fullTranscript = new StringBuilder();
         private readonly CallAnalyticsService _callAnalyticsService;
-        // private readonly ILogger<AzureOpenAIService> //_logger;
+        private readonly ILogger<AzureOpenAIService> _logger;
 
-        public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration, CallAutomationClient client, string callConnectionId,CustomCallingContext customContext)
+        public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration, CallAutomationClient client, string callConnectionId,CustomCallingContext customContext, ILogger<AzureOpenAIService> logger)
         {            
             m_mediaStreaming = mediaStreaming;
             m_cts = new CancellationTokenSource();
@@ -51,7 +51,7 @@ namespace CallAutomationOpenAI
             this.customContext = customContext;
             _callAnalyticsService = new CallAnalyticsService(configuration);
 
-            // this.//_logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AzureOpenAIService>.Instance;
+            _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AzureOpenAIService>.Instance; 
             this.toolHandler = new ToolHandler(client, callConnectionId, configuration,customContext);
         }
 
@@ -122,7 +122,17 @@ namespace CallAutomationOpenAI
         {
             Name = "speakToAgent",
             Description = "Invoked when the user wants to talk or reach out or speak to a pharmacist or doctor.",
-            Parameters = BinaryData.FromString("{}")
+            Parameters = BinaryData.FromString("""
+                {
+                    "type": "object",
+                    "properties": {
+                    "callIntent": {"type": "string", "description": "A 48 character description of the reason for the call."},
+                    "callSummary": {"type": "string", "description": "A 750 character summary of the conversation."},
+                    "callSentiment": {"type": "string", "description": "The sentiment of the call. Positive, Neutral or Negative."},
+                    "suggestedActions": {"type": "string", "description": "The suggested actions for the call."}
+                    }
+                }
+                """)
         };
 
 
@@ -130,7 +140,17 @@ namespace CallAutomationOpenAI
         {
             Name = "endConversation",
             Description = " Leave the call when you say goodbye or caller says goodbye or Thank you or The user has nothing for you to act upon",
-            Parameters = BinaryData.FromString("{}")
+            Parameters = BinaryData.FromString("""
+                {
+                    "type": "object",
+                    "properties": {
+                    "callTopic": {"type": "string", "description": "A 48 character description of the reason for the call."},
+                    "callContext": {"type": "string", "description": "A 750 character summary of the conversation."},
+                    "callSentiment": {"type": "string", "description": "The sentiment of the call. Positive, Neutral or Negative."},
+                    "suggestedActions": {"type": "string", "description": "The suggested actions for the call."}
+                    }
+                }
+                """)
         };
 
         // Loop and wait for the AI response
@@ -139,6 +159,7 @@ namespace CallAutomationOpenAI
             try
             {
                 await m_aiSession.StartResponseAsync();
+                _logger.LogInformation("Started AI session response");
                 await foreach (ConversationUpdate update in m_aiSession.ReceiveUpdatesAsync(m_cts.Token))
                 {
                    
@@ -196,12 +217,7 @@ namespace CallAutomationOpenAI
                     {
                         if(!string.IsNullOrEmpty(itemStreamingFinishedUpdate.FunctionName))
                         {
-                            if (itemStreamingFinishedUpdate.FunctionName == "speakToAgent")
-                            {
-                                callAnalytics = await ProcessCallAnalytics();
-                            }
-
-                            var result = await toolHandler.HandleToolInvocation(itemStreamingFinishedUpdate.FunctionName, itemStreamingFinishedUpdate.FunctionCallArguments, callAnalytics);
+                            var result = await toolHandler.HandleToolInvocation(itemStreamingFinishedUpdate.FunctionName, itemStreamingFinishedUpdate.FunctionCallArguments);
 
                             ConversationItem functionOutputItem = ConversationItem.CreateFunctionCallOutput(
                               callId: itemStreamingFinishedUpdate.FunctionCallId,
@@ -286,26 +302,14 @@ namespace CallAutomationOpenAI
             catch (OperationCanceledException e)
             {
                 Console.WriteLine($"{nameof(OperationCanceledException)} thrown with message: {e.Message}");
-                ////_logger.LogWarning(e, "OperationCanceledException during AI streaming");
+                _logger.LogWarning(e, "OperationCanceledException during AI streaming");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Exception during ai streaming -> {ex}");
-              //  //_logger.LogError(ex, "Exception during AI streaming");
+             _logger.LogError(ex, "Exception during AI streaming");
             }
         }
-        private async Task<CallAnalytics> ProcessCallAnalytics()
-        {
-            Console.WriteLine("Processing call analytics with ChatGPT...");
-
-            // Get the transcript
-            string transcript = GetFullTranscript();
-
-            // Use the dedicated service to analyze the transcript
-            return await _callAnalyticsService.AnalyzeTranscriptWithChatGPT(transcript);
-        }
-
-
 
         private async Task hangUp()
         {

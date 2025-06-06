@@ -5,6 +5,7 @@ using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
+using CallAutomationOpenAI;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Azure;
 using Newtonsoft.Json;
@@ -12,6 +13,10 @@ using JsonSerializer = System.Text.Json.JsonSerializer;
 
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddAzureWebAppDiagnostics();
+builder.Logging.SetMinimumLevel(LogLevel.Information);
 AcsMediaStreamingHandler mediaService = null;
 
 //Get ACS Connection String from appsettings.json
@@ -106,7 +111,7 @@ app.MapPost("/api/incomingCall", async (
 
                 var endtime = DateTime.Now;
                 Console.WriteLine($"Call answered at : {DateTime.Now:yyyy - MM - dd HH: mm: ss.fff} ");
-                logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
+                logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId} at : {DateTime.Now:yyyy - MM - dd HH: mm: ss.fff}");
                 var duration = (endtime - startime).TotalMilliseconds;
                 Console.WriteLine($"Call answered in: {duration} ms");
                 logger.LogInformation("Call answered in {Duration} ms", duration);
@@ -229,12 +234,12 @@ app.MapPost("/api/callbacks/{contextId}", async (
     {
         CallAutomationEventBase @event = CallAutomationEventParser.Parse(cloudEvent);
         Console.WriteLine($"Event received: {JsonConvert.SerializeObject(@event, Formatting.Indented)}");
-      //  logger.LogInformation($"Event received: {JsonConvert.SerializeObject(@event, Formatting.Indented)}");
+         logger.LogInformation($"Event received: {JsonConvert.SerializeObject(@event, Formatting.Indented)}");
 
         if (cloudEvent.Type == "Microsoft.Communication.CallDisconnected")
         {
             Console.WriteLine("Call disconnected event received, hanging up");
-        //    logger.LogInformation("Call disconnected event received, hanging up");
+           logger.LogInformation("Call disconnected event received, hanging up");
             var callConnection = client.GetCallConnection(callConnectionId);
             await callConnection.HangUpAsync(true);
         }
@@ -254,17 +259,20 @@ app.Use(async (context, next) =>
             try
             {
                 Console.WriteLine($"web socket received on. {DateTime.Now:yyyy - MM - dd HH: mm: ss.fff} ");
-                //app.Logger.LogInformation("WebSocket connection request received at {Timestamp}", DateTime.Now);
+                app.Logger.LogInformation("WebSocket connection request received at {Timestamp}", DateTime.Now);
                 var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-                
+
                 // Get logger from the service provider
-                var logger = context.RequestServices.GetRequiredService<ILogger<AcsMediaStreamingHandler>>();
-                
+                // Get the correct logger type from the service provider
+                var mediaStreamingLogger = Microsoft.Extensions.Logging.LoggerFactory
+                    .Create(builder => builder.AddConsole())
+                    .CreateLogger<AcsMediaStreamingHandler>();
+
                 // Pass logger to the handler
-                mediaService = new AcsMediaStreamingHandler(webSocket, builder.Configuration, client, callConnectionId, customContext);
+                mediaService = new AcsMediaStreamingHandler(webSocket, builder.Configuration, client, callConnectionId, customContext, mediaStreamingLogger);
                 
                 // Set the single WebSocket connection
-                await mediaService.ProcessWebSocketAsync();
+                await mediaService.ProcessWebSocketAsync(); 
             }
             catch (Exception ex)
             {
